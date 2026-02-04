@@ -99,19 +99,19 @@ val unlockPremiumPatch = bytecodePatch(
                     when {
                         hasConst3 -> {
                             // isPMTeam (checks 3) -> force false
-                            method.returnEarly(false)
+                            method.returnEarly(0)
                         }
                         hasConst2 -> {
                             // isPlus (checks 2) -> force true
-                            method.returnEarly(true)
+                            method.returnEarly(1)
                         }
                         hasIfZero -> {
                             // isFreeUser (checks 0 using if-eqz) -> force false
-                            method.returnEarly(false)
+                            method.returnEarly(0)
                         }
                         hasConst1 -> {
                             // isBasic (checks 1) -> force true
-                            method.returnEarly(true)
+                            method.returnEarly(1)
                         }
                     }
                 }
