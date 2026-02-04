@@ -25,6 +25,8 @@ jobs:
           cat <<EOF > ~/.gradle/gradle.properties
           gpr.user=${GPR_USER}
           gpr.key=${GPR_KEY}
+          githubPackagesUsername=${GPR_USER}
+          githubPackagesPassword=${GPR_KEY}
           EOF
         env:
           GPR_USER: ${{ secrets.GPR_USER }}
