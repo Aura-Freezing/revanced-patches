@@ -1,4 +1,3 @@
-// app/revanced/patches/protonvpn/premium/UnlockPremiumPatch.kt
 package app.revanced.patches.protonvpn.premium
 
 import app.revanced.patcher.patch.bytecodePatch
@@ -24,18 +23,56 @@ val unlockPremiumPatch = bytecodePatch(
             val vpnUserClassType = vpnUserMethod.definingClass
             val vpnUserClass = classes.firstOrNull { it.type == vpnUserClassType } ?: return@run
 
-            val integerType = "Ljava/lang/Integer;"
-            val maxTierField = vpnUserClass.fields.find { it.type == integerType } ?: return@run
+            // Find the tier field by looking for a field accessed by methods that look like tier checks.
+            val fieldScores = mutableMapOf<FieldReference, Int>()
+
+            vpnUserClass.methods.forEach { method ->
+                val instructions = method.implementation?.instructions ?: return@forEach
+
+                // Identify if this method looks like a tier check
+                var score = 0
+                if (method.returnType == "Z") {
+                    val hasConst1 = instructions.any { (it as? NarrowLiteralInstruction)?.narrowLiteral == 1 }
+                    val hasConst2 = instructions.any { (it as? NarrowLiteralInstruction)?.narrowLiteral == 2 }
+                    val hasConst3 = instructions.any { (it as? NarrowLiteralInstruction)?.narrowLiteral == 3 }
+                    val hasIfZero = instructions.any { it.opcode == Opcode.IF_EQZ || it.opcode == Opcode.IF_NEZ }
+
+                    if (hasConst1) score++
+                    if (hasConst2) score++
+                    if (hasConst3) score++
+                    if (hasIfZero) score++
+                } else if (method.returnType == "I") {
+                    // userTier() might just return the field, so it might not have constants.
+                    score += 1
+                }
+
+                if (score > 0) {
+                    // Find fields read in this method
+                    instructions.forEach { insn ->
+                        if (insn.opcode == Opcode.IGET || insn.opcode == Opcode.IGET_OBJECT) {
+                            val ref = (insn as? ReferenceInstruction)?.reference as? FieldReference
+                            if (ref != null && ref.definingClass == vpnUserClassType) {
+                                // Check type: should be Int or Integer
+                                if (ref.type == "I" || ref.type == "Ljava/lang/Integer;") {
+                                    fieldScores[ref] = fieldScores.getOrDefault(ref, 0) + score
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pick the field with the highest score
+            val maxTierField = fieldScores.entries.maxByOrNull { it.value }?.key ?: return@run
 
             vpnUserClass.methods.forEach { method ->
                 // Does this method read the maxTier field?
-                val readsMaxTier = method.implementation
-                    ?.instructions
-                    ?.any { insn ->
-                        insn.opcode == Opcode.IGET_OBJECT &&
-                            (insn as? ReferenceInstruction)?.reference
-                                ?.let { it as? FieldReference }?.name == maxTierField.name
-                    } == true
+                val instructions = method.implementation?.instructions ?: return@forEach
+
+                val readsMaxTier = instructions.any { insn ->
+                    (insn.opcode == Opcode.IGET || insn.opcode == Opcode.IGET_OBJECT) &&
+                            (insn as? ReferenceInstruction)?.reference == maxTierField
+                }
 
                 if (!readsMaxTier) return@forEach
 
@@ -45,8 +82,6 @@ val unlockPremiumPatch = bytecodePatch(
                     var hasConst2 = false
                     var hasConst3 = false
                     var hasIfZero = false // IF_EQZ / IF_NEZ
-
-                    val instructions = method.implementation?.instructions ?: return@forEach
 
                     for (inst in instructions) {
                         if (inst is NarrowLiteralInstruction) {
