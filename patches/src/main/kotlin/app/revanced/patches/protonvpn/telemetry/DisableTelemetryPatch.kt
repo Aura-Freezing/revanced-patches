@@ -31,7 +31,7 @@ val disableTelemetryPatch = bytecodePatch(
 
             sentryClass.methods.forEach { method ->
                 when (method.returnType) {
-                    "Z" -> method.returnEarly(false) // boolean → always “disabled”
+                    "Z" -> method.returnEarly(0)     // boolean → always “disabled”
                     "V" -> method.returnEarly()      // void → no‑op
                 }
             }
