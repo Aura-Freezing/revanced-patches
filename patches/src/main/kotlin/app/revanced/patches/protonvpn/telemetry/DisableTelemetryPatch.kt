@@ -1,4 +1,3 @@
-// app/revanced/patches/protonvpn/telemetry/DisableTelemetryPatch.kt
 package app.revanced.patches.protonvpn.telemetry
 
 import app.revanced.patcher.extensions.InstructionExtensions.replaceInstruction
@@ -6,6 +5,7 @@ import app.revanced.patcher.patch.bytecodePatch
 import app.revanced.util.returnEarly
 import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction21c
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction22c
 import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.StringReference
@@ -48,7 +48,7 @@ val disableTelemetryPatch = bytecodePatch(
 
             var telemetryField: FieldReference? = null
 
-            // Find the field by scanning for "Telemetry: " then the following IGET_BOOLEAN
+            // Find the field by scanning for "Telemetry: " then the following IGET_BOOLEAN or SGET_BOOLEAN
             for (method in settingsClass.methods) {
                 if (telemetryField != null) break
 
@@ -63,13 +63,13 @@ val disableTelemetryPatch = bytecodePatch(
                         (inst as? ReferenceInstruction)?.reference
                             ?.let { it as? StringReference }?.string == "Telemetry: "
                     ) {
-                        // Look ahead a few instructions for IGET_BOOLEAN
+                        // Look ahead a few instructions for IGET_BOOLEAN or SGET_BOOLEAN
                         for (j in 1..15) {
                             val idx = i + j
                             if (idx >= instructions.size) break
                             val nextInst = instructions[idx]
 
-                            if (nextInst.opcode == Opcode.IGET_BOOLEAN) {
+                            if (nextInst.opcode == Opcode.IGET_BOOLEAN || nextInst.opcode == Opcode.SGET_BOOLEAN) {
                                 telemetryField =
                                     (nextInst as ReferenceInstruction).reference as FieldReference
                                 break
@@ -83,7 +83,7 @@ val disableTelemetryPatch = bytecodePatch(
 
             val targetField = telemetryField ?: return@run
 
-            // Replace all reads of this field (IGET_BOOLEAN) with const/4 vX, 0x0
+            // Replace all reads of this field with const/4 vX, 0x0
             classes.forEach { classDef ->
                 classDef.methods.forEach { method ->
                     val impl = method.implementation ?: return@forEach
@@ -92,7 +92,7 @@ val disableTelemetryPatch = bytecodePatch(
                     val indicesToPatch = ArrayList<Int>()
 
                     instructions.forEachIndexed { index, inst ->
-                        if (inst.opcode == Opcode.IGET_BOOLEAN) {
+                        if (inst.opcode == Opcode.IGET_BOOLEAN || inst.opcode == Opcode.SGET_BOOLEAN) {
                             val ref = (inst as ReferenceInstruction).reference as FieldReference
 
                             if (ref.name == targetField.name &&
@@ -106,8 +106,13 @@ val disableTelemetryPatch = bytecodePatch(
 
                     // Patch from the end so indexes stay valid
                     for (index in indicesToPatch.asReversed()) {
-                        val iget = instructions[index] as Instruction22c
-                        val register = iget.registerA
+                        val inst = instructions[index]
+                        val register: Int = when (inst) {
+                            is Instruction22c -> inst.registerA
+                            is Instruction21c -> inst.registerA
+                            else -> continue // Should not happen
+                        }
+
                         method.replaceInstruction(
                             index,
                             "const/4 v$register, 0x0"
